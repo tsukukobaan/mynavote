@@ -1,0 +1,22 @@
+{
+  "千葉6区": {
+    "name": "千葉県第6区",
+    "prefecture": "千葉県",
+    "municipalities": ["松戸市"]
+  },
+  "千葉1区": {
+    "name": "千葉県第1区",
+    "prefecture": "千葉県",
+    "municipalities": ["千葉市中央区", "千葉市稲毛区", "千葉市美浜区"]
+  },
+  "東京1区": {
+    "name": "東京都第1区",
+    "prefecture": "東京都",
+    "municipalities": ["千代田区", "港区", "新宿区"]
+  },
+  "東京2区": {
+    "name": "東京都第2区",
+    "prefecture": "東京都",
+    "municipalities": ["中央区", "文京区", "台東区"]
+  }
+}
