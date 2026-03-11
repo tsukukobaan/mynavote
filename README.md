@@ -23,8 +23,9 @@
 
 ## 技術スタック
 
-- **フロントエンド**: Next.js 14+ (App Router) / TypeScript / Tailwind CSS / shadcn/ui
-- **バックエンド**: Next.js API Routes / Prisma ORM / PostgreSQL
+- **フロントエンド**: Next.js 16 (App Router) / TypeScript / Tailwind CSS
+- **バックエンド**: Next.js API Routes / Prisma ORM
+- **データベース**: SQLite（ローカル開発）/ PostgreSQL（本番）
 - **セッション・レート制限**: Redis（ローカル開発時はインメモリフォールバック）
 - **暗号化**: libsodium-wrappers (ブラウザ) / sodium-native (サーバー)
 - **テスト**: Vitest / Playwright
@@ -34,7 +35,7 @@
 ### 前提条件
 
 - Node.js 18+
-- PostgreSQL
+- PostgreSQL または Docker（本番用。ローカル開発はSQLiteで動作）
 - Redis（オプション。なくてもインメモリフォールバックで開発可能）
 
 ### インストール
@@ -53,6 +54,8 @@ npm install
 cp .env.example .env
 ```
 
+デフォルトでSQLiteを使用するため、そのまま動作します。
+
 ### データベースセットアップ
 
 ```bash
@@ -65,14 +68,31 @@ npx prisma migrate dev
 npm run dev
 ```
 
+http://localhost:3000 でアクセスできます。
+
+### 動作確認の流れ
+
+1. http://localhost:3000/admin/elections/new で選挙を作成
+2. 選挙区・候補者・投票期間を入力 → 確認画面 → 作成
+3. 表示される**秘密鍵を保存**（開票に必要。再表示不可）
+4. APIで選挙ステータスをOPENに変更:
+   ```bash
+   curl -X PUT http://localhost:3000/api/admin/elections/{選挙ID}/status \
+     -H "Content-Type: application/json" \
+     -H "Authorization: Bearer dev-admin-token" \
+     -d '{"status":"OPEN"}'
+   ```
+5. http://localhost:3000/elections/{選挙ID} で投票画面を開く
+6. モックユーザーで認証 → 候補者選択 → 暗号化 → 投票
+
 ### テスト
 
 ```bash
-# ユニットテスト・統合テスト
+# ユニットテスト（53件）
 npm test
 
-# E2Eテスト
-npm run test:e2e
+# ウォッチモード
+npm run test:watch
 ```
 
 ## 設計ドキュメント
@@ -96,7 +116,7 @@ npm run test:e2e
 
 ## 開発ステータス
 
-- [x] Phase 1: MVP（モック認証で全フロー動作） — 開発中
+- [x] Phase 1: MVP（モック認証で全フロー動作）
 - [ ] Phase 2: デジタル庁Sandbox接続
 - [ ] Phase 3: 本番準備
 

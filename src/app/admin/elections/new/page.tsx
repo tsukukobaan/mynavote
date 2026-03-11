@@ -16,7 +16,6 @@ interface CreatedElection {
 }
 
 interface ValidationErrors {
-  adminToken?: string;
   title?: string;
   votingStartAt?: string;
   votingEndAt?: string;
@@ -25,8 +24,13 @@ interface ValidationErrors {
   general?: string;
 }
 
+type Step = "edit" | "confirm" | "done";
+
+const INPUT_CLASS =
+  "w-full border border-gray-300 rounded px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent";
+
 export default function NewElectionPage() {
-  const [adminToken, setAdminToken] = useState("");
+  const [step, setStep] = useState<Step>("edit");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [districtId, setDistrictId] = useState("");
@@ -62,13 +66,12 @@ export default function NewElectionPage() {
     setCandidates(updated);
   }
 
+  const filledCandidates = candidates.filter((c) => c.name.trim());
+
   function validate(): boolean {
     const newErrors: ValidationErrors = {};
     const candidateNameErrors: Record<number, string> = {};
 
-    if (!adminToken.trim()) {
-      newErrors.adminToken = "管理者トークンを入力してください";
-    }
     if (!title.trim()) {
       newErrors.title = "選挙タイトルを入力してください";
     }
@@ -82,15 +85,12 @@ export default function NewElectionPage() {
       newErrors.votingEndAt = "終了日時は開始日時より後にしてください";
     }
 
-    const filledCandidates = candidates.filter((c) => c.name.trim());
     if (filledCandidates.length < 2) {
       newErrors.candidates = "候補者は最低2名必要です";
     }
 
     candidates.forEach((c, i) => {
-      if (!c.name.trim() && candidates.length > 2) {
-        // Only flag empty names if there are more than 2 slots
-      } else if (!c.name.trim()) {
+      if (!c.name.trim() && candidates.length <= 2) {
         candidateNameErrors[i] = "候補者名を入力してください";
       }
     });
@@ -103,38 +103,35 @@ export default function NewElectionPage() {
     return Object.keys(newErrors).length === 0;
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleConfirm(e: React.FormEvent) {
     e.preventDefault();
     if (!validate()) return;
+    setStep("confirm");
+  }
 
+  async function handleSubmit() {
     setSubmitting(true);
     setErrors({});
 
     try {
-      const toISOWithTimezone = (localDatetime: string) => {
-        return new Date(localDatetime).toISOString();
-      };
-
       const body = {
         title: title.trim(),
         description: description.trim() || undefined,
         districtId: districtId || undefined,
-        votingStartAt: toISOWithTimezone(votingStartAt),
-        votingEndAt: toISOWithTimezone(votingEndAt),
+        votingStartAt: new Date(votingStartAt).toISOString(),
+        votingEndAt: new Date(votingEndAt).toISOString(),
         allowRevote,
-        candidates: candidates
-          .filter((c) => c.name.trim())
-          .map((c) => ({
-            name: c.name.trim(),
-            profile: c.profile.trim() || undefined,
-          })),
+        candidates: filledCandidates.map((c) => ({
+          name: c.name.trim(),
+          profile: c.profile.trim() || undefined,
+        })),
       };
 
       const res = await fetch("/api/admin/elections", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_ADMIN_TOKEN ?? ""}`,
         },
         body: JSON.stringify(body),
       });
@@ -145,21 +142,34 @@ export default function NewElectionPage() {
           general:
             data?.error || `エラーが発生しました（ステータス: ${res.status}）`,
         });
+        setStep("edit");
         return;
       }
 
       const data = await res.json();
       setCreatedElection(data.election);
       setSecretKey(data.secretKey);
+      setStep("done");
     } catch {
       setErrors({ general: "通信エラーが発生しました。再度お試しください。" });
+      setStep("edit");
     } finally {
       setSubmitting(false);
     }
   }
 
-  // Show success screen after creation
-  if (createdElection && secretKey) {
+  const districtLabel: Record<string, string> = {
+    "千葉6区": "千葉6区（松戸市）",
+    "千葉1区": "千葉1区（千葉市中央区・稲毛区・美浜区）",
+    "東京1区": "東京1区（千代田区・港区・新宿区）",
+    "東京2区": "東京2区（中央区・文京区・台東区）",
+  };
+
+  const formatDatetime = (v: string) =>
+    v ? new Date(v).toLocaleString("ja-JP") : "";
+
+  // === Step: Done ===
+  if (step === "done" && createdElection && secretKey) {
     return (
       <div className="min-h-screen bg-gray-50 py-8 px-4">
         <div className="max-w-2xl mx-auto">
@@ -167,24 +177,23 @@ export default function NewElectionPage() {
             <h1 className="text-2xl font-bold text-green-700 mb-4">
               選挙が作成されました
             </h1>
-
-            <div className="space-y-3 mb-6">
+            <div className="space-y-3 mb-6 text-gray-900">
               <div>
-                <span className="font-semibold text-gray-700">選挙ID：</span>
+                <span className="font-semibold">選挙ID：</span>
                 <code className="bg-gray-100 px-2 py-0.5 rounded text-sm">
                   {createdElection.id}
                 </code>
               </div>
               <div>
-                <span className="font-semibold text-gray-700">タイトル：</span>
+                <span className="font-semibold">タイトル：</span>
                 {createdElection.title}
               </div>
               <div>
-                <span className="font-semibold text-gray-700">ステータス：</span>
-                {createdElection.status}
+                <span className="font-semibold">ステータス：</span>
+                {createdElection.status}（APIでOPENに変更して投票開始）
               </div>
               <div>
-                <span className="font-semibold text-gray-700">候補者：</span>
+                <span className="font-semibold">候補者：</span>
                 <ul className="list-disc list-inside ml-2 mt-1">
                   {createdElection.candidates.map((c) => (
                     <li key={c.id}>{c.name}</li>
@@ -205,34 +214,32 @@ export default function NewElectionPage() {
               <p className="text-red-700 text-sm mt-1">
                 必ず安全な場所（オフライン環境）に保存してください。
                 この鍵がなければ開票（投票の復号）ができません。
-                第三者に漏洩した場合、投票の秘密が侵害されます。
               </p>
             </div>
-            <div className="relative">
-              <textarea
-                readOnly
-                value={secretKey}
-                rows={3}
-                className="w-full font-mono text-sm bg-white border border-gray-300 rounded p-3 resize-none"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(secretKey);
-                }}
-                className="mt-2 px-4 py-2 bg-gray-700 text-white text-sm rounded hover:bg-gray-800 transition-colors"
-              >
-                クリップボードにコピー
-              </button>
-            </div>
+            <textarea
+              readOnly
+              value={secretKey}
+              rows={3}
+              className="w-full font-mono text-sm text-gray-900 bg-white border border-gray-300 rounded p-3 resize-none"
+            />
+            <button
+              type="button"
+              onClick={() => navigator.clipboard.writeText(secretKey)}
+              className="mt-2 px-4 py-2 bg-gray-700 text-white text-sm rounded hover:bg-gray-800"
+            >
+              クリップボードにコピー
+            </button>
           </div>
 
-          <div className="mt-6 text-center">
+          <div className="mt-6 flex gap-4 justify-center">
             <a
-              href="/admin/elections"
+              href={`/elections/${createdElection.id}`}
               className="text-blue-600 hover:underline text-sm"
             >
-              選挙一覧に戻る
+              選挙ページを見る
+            </a>
+            <a href="/" className="text-blue-600 hover:underline text-sm">
+              トップに戻る
             </a>
           </div>
         </div>
@@ -240,6 +247,101 @@ export default function NewElectionPage() {
     );
   }
 
+  // === Step: Confirm ===
+  if (step === "confirm") {
+    return (
+      <div className="min-h-screen bg-gray-50 py-8 px-4">
+        <div className="max-w-2xl mx-auto">
+          <h1 className="text-2xl font-bold text-gray-900 mb-6">
+            内容を確認してください
+          </h1>
+
+          <div className="bg-white rounded-lg shadow p-6 space-y-4 text-gray-900">
+            <div>
+              <span className="font-semibold text-gray-600 text-sm">
+                選挙タイトル
+              </span>
+              <p className="text-lg">{title}</p>
+            </div>
+
+            {description && (
+              <div>
+                <span className="font-semibold text-gray-600 text-sm">
+                  説明
+                </span>
+                <p>{description}</p>
+              </div>
+            )}
+
+            <div>
+              <span className="font-semibold text-gray-600 text-sm">
+                対象選挙区
+              </span>
+              <p>{districtId ? districtLabel[districtId] ?? districtId : "制限なし（全国）"}</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <span className="font-semibold text-gray-600 text-sm">
+                  投票開始
+                </span>
+                <p>{formatDatetime(votingStartAt)}</p>
+              </div>
+              <div>
+                <span className="font-semibold text-gray-600 text-sm">
+                  投票終了
+                </span>
+                <p>{formatDatetime(votingEndAt)}</p>
+              </div>
+            </div>
+
+            <div>
+              <span className="font-semibold text-gray-600 text-sm">
+                再投票
+              </span>
+              <p>{allowRevote ? "許可（最後の投票のみ有効）" : "不可"}</p>
+            </div>
+
+            <div>
+              <span className="font-semibold text-gray-600 text-sm">
+                候補者
+              </span>
+              <ul className="mt-1 space-y-2">
+                {filledCandidates.map((c, i) => (
+                  <li key={i} className="border border-gray-200 rounded p-3">
+                    <p className="font-medium">{c.name}</p>
+                    {c.profile && (
+                      <p className="text-sm text-gray-600 mt-1">{c.profile}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          <div className="mt-6 flex gap-4 justify-end">
+            <button
+              type="button"
+              onClick={() => setStep("edit")}
+              className="px-6 py-3 border border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-100"
+            >
+              修正する
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={submitting}
+              className="px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              {submitting ? "作成中..." : "この内容で作成する"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // === Step: Edit ===
   return (
     <div className="min-h-screen bg-gray-50 py-8 px-4">
       <div className="max-w-2xl mx-auto">
@@ -253,24 +355,7 @@ export default function NewElectionPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Admin Token */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <label className="block text-sm font-semibold text-gray-700 mb-1">
-              管理者トークン
-            </label>
-            <input
-              type="password"
-              value={adminToken}
-              onChange={(e) => setAdminToken(e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="管理者トークンを入力"
-            />
-            {errors.adminToken && (
-              <p className="text-red-600 text-xs mt-1">{errors.adminToken}</p>
-            )}
-          </div>
-
+        <form onSubmit={handleConfirm} className="space-y-6">
           {/* Election Details */}
           <div className="bg-white rounded-lg shadow p-6 space-y-4">
             <h2 className="text-lg font-semibold text-gray-800">選挙情報</h2>
@@ -284,7 +369,7 @@ export default function NewElectionPage() {
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 maxLength={200}
-                className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className={INPUT_CLASS}
                 placeholder="例：第6区 衆議院予備選挙"
               />
               {errors.title && (
@@ -301,7 +386,7 @@ export default function NewElectionPage() {
                 onChange={(e) => setDescription(e.target.value)}
                 maxLength={2000}
                 rows={3}
-                className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-vertical"
+                className={`${INPUT_CLASS} resize-vertical`}
                 placeholder="選挙の説明（任意）"
               />
             </div>
@@ -313,13 +398,13 @@ export default function NewElectionPage() {
               <select
                 value={districtId}
                 onChange={(e) => setDistrictId(e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                className={`${INPUT_CLASS} bg-white`}
               >
                 <option value="">制限なし（全国）</option>
-                <option value="千葉6区">千葉6区</option>
-                <option value="千葉1区">千葉1区</option>
-                <option value="東京1区">東京1区</option>
-                <option value="東京2区">東京2区</option>
+                <option value="千葉6区">千葉6区（松戸市）</option>
+                <option value="千葉1区">千葉1区（千葉市中央区・稲毛区・美浜区）</option>
+                <option value="東京1区">東京1区（千代田区・港区・新宿区）</option>
+                <option value="東京2区">東京2区（中央区・文京区・台東区）</option>
               </select>
             </div>
 
@@ -332,7 +417,7 @@ export default function NewElectionPage() {
                   type="datetime-local"
                   value={votingStartAt}
                   onChange={(e) => setVotingStartAt(e.target.value)}
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className={INPUT_CLASS}
                 />
                 {errors.votingStartAt && (
                   <p className="text-red-600 text-xs mt-1">
@@ -348,7 +433,7 @@ export default function NewElectionPage() {
                   type="datetime-local"
                   value={votingEndAt}
                   onChange={(e) => setVotingEndAt(e.target.value)}
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className={INPUT_CLASS}
                 />
                 {errors.votingEndAt && (
                   <p className="text-red-600 text-xs mt-1">
@@ -366,10 +451,7 @@ export default function NewElectionPage() {
                 onChange={(e) => setAllowRevote(e.target.checked)}
                 className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
-              <label
-                htmlFor="allowRevote"
-                className="text-sm text-gray-700"
-              >
+              <label htmlFor="allowRevote" className="text-sm text-gray-700">
                 再投票を許可する（最後の投票のみ有効）
               </label>
             </div>
@@ -384,7 +466,7 @@ export default function NewElectionPage() {
               <button
                 type="button"
                 onClick={addCandidate}
-                className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
+                className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
               >
                 + 候補者を追加
               </button>
@@ -398,7 +480,7 @@ export default function NewElectionPage() {
               {candidates.map((candidate, index) => (
                 <div
                   key={index}
-                  className="border border-gray-200 rounded p-4 relative"
+                  className="border border-gray-200 rounded p-4"
                 >
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-600">
@@ -423,7 +505,7 @@ export default function NewElectionPage() {
                           updateCandidate(index, "name", e.target.value)
                         }
                         maxLength={100}
-                        className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className={INPUT_CLASS}
                         placeholder="候補者名"
                       />
                       {errors.candidateNames?.[index] && (
@@ -439,7 +521,7 @@ export default function NewElectionPage() {
                       }
                       maxLength={2000}
                       rows={2}
-                      className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-vertical"
+                      className={`${INPUT_CLASS} resize-vertical`}
                       placeholder="プロフィール（任意）"
                     />
                   </div>
@@ -452,10 +534,9 @@ export default function NewElectionPage() {
           <div className="flex justify-end">
             <button
               type="submit"
-              disabled={submitting}
-              className="px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+              className="px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700"
             >
-              {submitting ? "作成中..." : "選挙を作成する"}
+              確認画面へ
             </button>
           </div>
         </form>
