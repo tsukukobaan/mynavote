@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Election {
+  id              String          @id @default(cuid())
+  title           String
+  description     String?
+  organizationId  String          @default("default")
+  status          ElectionStatus  @default(DRAFT)
+  districtId      String?
+  votingStartAt   DateTime
+  votingEndAt     DateTime
+  publicKey       String
+  latestChainHash String?
+  allowRevote     Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  candidates      Candidate[]
+  ballots         Ballot[]
+  voterRegistry   VoterRegistry[]
+  results         ElectionResult[]
+}
+
+enum ElectionStatus {
+  DRAFT
+  OPEN
+  CLOSED
+  COUNTING
+  FINALIZED
+}
+
+model Candidate {
+  id           String   @id @default(cuid())
+  electionId   String
+  election     Election @relation(fields: [electionId], references: [id])
+  name         String
+  profile      String?
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+}
+
+model VoterRegistry {
+  id             String    @id @default(cuid())
+  electionId     String
+  election       Election  @relation(fields: [electionId], references: [id])
+  subjectHash    String
+  district       String?
+  hasVoted       Boolean   @default(false)
+  latestBallotId String?
+  voteCount      Int       @default(0)
+  votedAt        DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([electionId, subjectHash])
+}
+
+model Ballot {
+  id            String   @id @default(cuid())
+  electionId    String
+  election      Election @relation(fields: [electionId], references: [id])
+  encryptedVote String
+  ballotTracker String
+  hmac          String
+  previousHash  String
+  isLatest      Boolean  @default(true)
+  timestamp     DateTime @default(now())
+}
+
+model ElectionResult {
+  id          String   @id @default(cuid())
+  electionId  String
+  election    Election @relation(fields: [electionId], references: [id])
+  candidateId String
+  voteCount   Int
+  finalizedAt DateTime @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String
+  electionId String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+}
