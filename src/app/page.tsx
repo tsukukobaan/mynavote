@@ -98,9 +98,18 @@ export default function Home() {
                     {STATUS_LABEL[e.status] ?? e.status}
                   </span>
                 </div>
-                <div className="mt-3 text-sm text-gray-500">
-                  候補者: {e.candidates.map((c) => c.name).join("、")} / 投票数:{" "}
-                  {e.voteCount}
+                <div className="mt-3 flex justify-between items-center">
+                  <span className="text-sm text-gray-500">
+                    候補者: {e.candidates.map((c) => c.name).join("、")} / 投票数:{" "}
+                    {e.voteCount}
+                  </span>
+                  <Link
+                    href={`/admin/elections/${e.id}`}
+                    className="text-xs text-gray-400 hover:text-blue-600 hover:underline ml-4 shrink-0"
+                    onClick={(ev) => ev.stopPropagation()}
+                  >
+                    管理
+                  </Link>
                 </div>
               </Link>
             ))}
