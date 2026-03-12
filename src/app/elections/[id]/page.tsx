@@ -39,10 +39,10 @@ interface MockUser {
 
 type Step =
   | "info"
-  | "auth"
-  | "ineligible"
   | "select"
   | "confirm"
+  | "auth"
+  | "ineligible"
   | "encrypting"
   | "complete"
   | "error";
@@ -98,8 +98,12 @@ export default function ElectionDetailPage() {
   const [authDistrict, setAuthDistrict] = useState<string | null>(null);
 
   // Voting
-  const [shuffledCandidates, setShuffledCandidates] = useState<Candidate[]>([]);
-  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  const [shuffledCandidates, setShuffledCandidates] = useState<Candidate[]>(
+    []
+  );
+  const [selectedCandidateId, setSelectedCandidateId] = useState<
+    string | null
+  >(null);
 
   // Result
   const [ballotTracker, setBallotTracker] = useState<string | null>(null);
@@ -136,11 +140,24 @@ export default function ElectionDetailPage() {
 
   // --- Handlers ---
 
+  function handleStartVoting() {
+    if (!election) return;
+    setShuffledCandidates(shuffleArray(election.candidates));
+    setStep("select");
+  }
+
+  function handleSelectCandidate() {
+    if (!selectedCandidateId) return;
+    setStep("confirm");
+  }
+
   async function handleStartAuth() {
+    // When user clicks "暗号化して投票する", start auth flow
     try {
       const res = await fetch("/api/auth/mock");
       if (!res.ok) {
         setError("モック認証ユーザーの取得に失敗しました。");
+        setStep("error");
         return;
       }
       const data = await res.json();
@@ -148,44 +165,52 @@ export default function ElectionDetailPage() {
       setStep("auth");
     } catch {
       setError("通信エラーが発生しました。");
+      setStep("error");
     }
   }
 
-  async function handleAuthenticate() {
+  async function handleAuthenticateAndVote() {
     if (!selectedUserId || !election) return;
 
     setAuthenticating(true);
     try {
-      const res = await fetch("/api/auth/mock", {
+      // 1. Authenticate
+      const authRes = await fetch("/api/auth/mock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: selectedUserId, electionId: election.id }),
+        body: JSON.stringify({
+          userId: selectedUserId,
+          electionId: election.id,
+        }),
       });
 
-      if (res.status === 429) {
-        setError("認証の試行回数が上限に達しました。しばらくしてから再度お試しください。");
+      if (authRes.status === 429) {
+        setError(
+          "認証の試行回数が上限に達しました。しばらくしてから再度お試しください。"
+        );
         setStep("error");
         return;
       }
 
-      if (!res.ok) {
+      if (!authRes.ok) {
         setError("認証に失敗しました。");
         setStep("error");
         return;
       }
 
-      const data = await res.json();
-      setCsrfToken(data.csrfToken);
-      setAuthDistrict(data.district);
+      const authData = await authRes.json();
+      setCsrfToken(authData.csrfToken);
+      setAuthDistrict(authData.district);
 
-      // Check eligibility
-      if (election.districtId && data.district !== election.districtId) {
+      // 2. Check eligibility
+      if (election.districtId && authData.district !== election.districtId) {
         setStep("ineligible");
-      } else {
-        // Eligible: show candidate selection with randomized order
-        setShuffledCandidates(shuffleArray(election.candidates));
-        setStep("select");
+        return;
       }
+
+      // 3. Proceed to encrypt and vote
+      setStep("encrypting");
+      await encryptAndSubmitVote(authData.csrfToken);
     } catch {
       setError("通信エラーが発生しました。");
       setStep("error");
@@ -194,15 +219,8 @@ export default function ElectionDetailPage() {
     }
   }
 
-  function handleSelectCandidate() {
-    if (!selectedCandidateId) return;
-    setStep("confirm");
-  }
-
-  async function handleConfirmVote() {
-    if (!selectedCandidateId || !election || !csrfToken) return;
-
-    setStep("encrypting");
+  async function encryptAndSubmitVote(token: string) {
+    if (!selectedCandidateId || !election) return;
 
     try {
       // Dynamically import libsodium
@@ -241,12 +259,14 @@ export default function ElectionDetailPage() {
           electionId: election.id,
           encryptedVote: encryptedVoteB64,
           ballotTracker: tracker,
-          csrfToken,
+          csrfToken: token,
         }),
       });
 
       if (res.status === 429) {
-        setError("投票の試行回数が上限に達しました。しばらくしてから再度お試しください。");
+        setError(
+          "投票の試行回数が上限に達しました。しばらくしてから再度お試しください。"
+        );
         setStep("error");
         return;
       }
@@ -434,19 +454,20 @@ export default function ElectionDetailPage() {
                     })}
                 </div>
                 <p className="text-sm text-gray-500 mt-4">
-                  総投票数: {election.results.reduce((s, r) => s + r.voteCount, 0)}票
+                  総投票数:{" "}
+                  {election.results.reduce((s, r) => s + r.voteCount, 0)}票
                 </p>
               </div>
             )}
 
-            {/* Auth button (if open) */}
+            {/* Vote button (if open) */}
             {election.status === "OPEN" && (
               <div className="text-center">
                 <button
-                  onClick={handleStartAuth}
+                  onClick={handleStartVoting}
                   className="px-6 py-3 bg-blue-600 text-white text-lg font-medium rounded-lg hover:bg-blue-700 transition shadow"
                 >
-                  マイナンバーカードで認証して投票する
+                  投票する
                 </button>
                 {election.allowRevote && (
                   <p className="text-sm text-gray-500 mt-3">
@@ -474,84 +495,6 @@ export default function ElectionDetailPage() {
               </div>
             )}
           </>
-        )}
-
-        {/* Step: Mock Auth panel */}
-        {step === "auth" && (
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
-              本人認証（モック）
-            </h2>
-            <p className="text-sm text-gray-500 mb-4">
-              テスト用のユーザーを選択してください。本番環境ではデジタル認証アプリによる認証が行われます。
-            </p>
-            <div className="space-y-3 mb-6">
-              {mockUsers.map((u) => (
-                <label
-                  key={u.sub}
-                  className={`flex items-start gap-3 border rounded-lg p-4 cursor-pointer transition ${
-                    selectedUserId === u.sub
-                      ? "border-blue-500 bg-blue-50"
-                      : "border-gray-200 hover:border-gray-300"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="mock-user"
-                    value={u.sub}
-                    checked={selectedUserId === u.sub}
-                    onChange={() => setSelectedUserId(u.sub)}
-                    className="mt-1"
-                  />
-                  <div>
-                    <p className="font-medium text-gray-900">{u.name}</p>
-                    <p className="text-sm text-gray-500">{u.address}</p>
-                  </div>
-                </label>
-              ))}
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  setStep("info");
-                  setSelectedUserId(null);
-                }}
-                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
-              >
-                戻る
-              </button>
-              <button
-                onClick={handleAuthenticate}
-                disabled={!selectedUserId || authenticating}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {authenticating ? "認証中..." : "認証する"}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step: Ineligible */}
-        {step === "ineligible" && (
-          <div className="bg-white rounded-lg shadow p-6 text-center">
-            <div className="text-red-500 text-4xl mb-4">&#x2716;</div>
-            <h2 className="text-lg font-semibold text-gray-900 mb-2">
-              この選挙の投票資格がありません
-            </h2>
-            <p className="text-gray-600 mb-2">
-              この選挙は{election.districtId}を対象としていますが、
-              あなたの選挙区は{authDistrict ?? "判定不能"}です。
-            </p>
-            <p className="text-sm text-gray-500 mb-6">
-              住所に基づく選挙区が対象地域と一致しないため、投票できません。
-            </p>
-            <button
-              onClick={handleReset}
-              className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
-            >
-              選挙トップに戻る
-            </button>
-          </div>
         )}
 
         {/* Step: Select candidate */}
@@ -624,7 +567,7 @@ export default function ElectionDetailPage() {
               </p>
             </div>
             <p className="text-xs text-gray-500 mb-6">
-              「暗号化して投票する」を押すと、投票内容がブラウザ内で暗号化されサーバーに送信されます。サーバーは投票内容の平文を見ることができません。
+              「暗号化して投票する」を押すと、マイナンバーカード認証（モック）の後、投票内容がブラウザ内で暗号化されサーバーに送信されます。サーバーは投票内容の平文を見ることができません。
             </p>
             <div className="flex gap-3">
               <button
@@ -634,7 +577,7 @@ export default function ElectionDetailPage() {
                 選び直す
               </button>
               <button
-                onClick={handleConfirmVote}
+                onClick={handleStartAuth}
                 className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
               >
                 暗号化して投票する
@@ -643,12 +586,90 @@ export default function ElectionDetailPage() {
           </div>
         )}
 
+        {/* Step: Auth (mock) - shown after clicking "暗号化して投票する" */}
+        {step === "auth" && (
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+              本人認証（モック）
+            </h2>
+            <p className="text-sm text-gray-500 mb-4">
+              テスト用のユーザーを選択してください。本番環境ではデジタル認証アプリによる認証が行われます。
+            </p>
+            <div className="space-y-3 mb-6">
+              {mockUsers.map((u) => (
+                <label
+                  key={u.sub}
+                  className={`flex items-start gap-3 border rounded-lg p-4 cursor-pointer transition ${
+                    selectedUserId === u.sub
+                      ? "border-blue-500 bg-blue-50"
+                      : "border-gray-200 hover:border-gray-300"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="mock-user"
+                    value={u.sub}
+                    checked={selectedUserId === u.sub}
+                    onChange={() => setSelectedUserId(u.sub)}
+                    className="mt-1"
+                  />
+                  <div>
+                    <p className="font-medium text-gray-900">{u.name}</p>
+                    <p className="text-sm text-gray-500">{u.address}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setStep("confirm");
+                  setSelectedUserId(null);
+                }}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+              >
+                戻る
+              </button>
+              <button
+                onClick={handleAuthenticateAndVote}
+                disabled={!selectedUserId || authenticating}
+                className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {authenticating ? "認証・投票中..." : "認証して投票を送信する"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step: Ineligible */}
+        {step === "ineligible" && (
+          <div className="bg-white rounded-lg shadow p-6 text-center">
+            <div className="text-red-500 text-4xl mb-4">&#x2716;</div>
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">
+              この選挙の投票資格がありません
+            </h2>
+            <p className="text-gray-600 mb-2">
+              この選挙は{election.districtId}を対象としていますが、
+              あなたの選挙区は{authDistrict ?? "判定不能"}です。
+            </p>
+            <p className="text-sm text-gray-500 mb-6">
+              住所に基づく選挙区が対象地域と一致しないため、投票できません。
+            </p>
+            <button
+              onClick={handleReset}
+              className="px-6 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition"
+            >
+              選挙トップに戻る
+            </button>
+          </div>
+        )}
+
         {/* Step: Encrypting */}
         {step === "encrypting" && (
           <div className="bg-white rounded-lg shadow p-6 text-center">
             <div className="animate-spin inline-block w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full mb-4" />
             <p className="text-gray-700">
-              投票内容を暗号化しています...
+              投票内容を暗号化して送信しています...
             </p>
             <p className="text-xs text-gray-400 mt-2">
               ブラウザ内で暗号化処理を行っています。サーバーには平文を送信しません。
