@@ -83,6 +83,7 @@ export default function AdminElectionDetailPage() {
         headers: {
           Authorization: `Bearer ${process.env.NEXT_PUBLIC_ADMIN_TOKEN ?? ""}`,
         },
+        cache: "no-store",
       });
       if (!res.ok) throw new Error("取得に失敗しました");
       const data = await res.json();
