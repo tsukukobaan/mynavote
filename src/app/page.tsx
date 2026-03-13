@@ -28,11 +28,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/admin/elections", {
-      headers: {
-        Authorization: `Bearer ${process.env.NEXT_PUBLIC_ADMIN_TOKEN ?? ""}`,
-      },
-    })
+    fetch("/api/elections")
       .then((r) => r.json())
       .then((data) => setElections(data.elections ?? []))
       .catch(() => setElections([]))
