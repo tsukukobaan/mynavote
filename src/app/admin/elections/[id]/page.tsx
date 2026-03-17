@@ -11,6 +11,12 @@ interface Candidate {
   displayOrder: number;
 }
 
+interface CountResult {
+  candidateId: string;
+  candidateName: string;
+  voteCount: number;
+}
+
 interface Election {
   id: string;
   title: string;
@@ -77,6 +83,12 @@ export default function AdminElectionDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Counting
+  const [secretKey, setSecretKey] = useState("");
+  const [counting, setCounting] = useState(false);
+  const [countResults, setCountResults] = useState<CountResult[] | null>(null);
+  const [totalVotes, setTotalVotes] = useState<number | null>(null);
+
   const fetchElection = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/elections", {
@@ -141,6 +153,42 @@ export default function AdminElectionDetailPage() {
       setError(e instanceof Error ? e.message : "エラーが発生しました");
     } finally {
       setUpdating(false);
+    }
+  }
+
+  async function handleCount() {
+    if (!secretKey.trim()) return;
+    if (!window.confirm("開票を実行しますか？秘密鍵で投票を復号し、集計を行います。")) return;
+
+    setCounting(true);
+    setError(null);
+    setSuccessMsg(null);
+    setCountResults(null);
+
+    try {
+      const res = await fetch(`/api/admin/elections/${id}/count`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.NEXT_PUBLIC_ADMIN_TOKEN ?? ""}`,
+        },
+        body: JSON.stringify({ secretKey: secretKey.trim() }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "開票に失敗しました");
+      }
+
+      const data = await res.json();
+      setCountResults(data.results);
+      setTotalVotes(data.totalVotes);
+      setElection((prev) => (prev ? { ...prev, status: "FINALIZED" } : prev));
+      setSuccessMsg("開票が完了しました。選挙はFINALIZED（確定済み）に移行しました。");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "エラーが発生しました");
+    } finally {
+      setCounting(false);
     }
   }
 
@@ -322,18 +370,79 @@ export default function AdminElectionDetailPage() {
               </button>
             </div>
           ) : election.status === "COUNTING" ? (
-            <p className="text-sm text-gray-600">
-              開票処理は
-              <span className="font-semibold">開票UI</span>
-              から秘密鍵を入力して実行してください。
-              開票が完了するとFINALIZEDに移行します。
-            </p>
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">
+                秘密鍵を入力して開票を実行してください。投票内容が復号・集計され、選挙はFINALIZEDに移行します。
+              </p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  秘密鍵（選挙作成時に表示されたもの）
+                </label>
+                <textarea
+                  value={secretKey}
+                  onChange={(e) => setSecretKey(e.target.value)}
+                  rows={3}
+                  placeholder="Base64エンコードされた秘密鍵を貼り付けてください"
+                  className="w-full font-mono text-sm text-gray-900 bg-white border border-gray-300 rounded p-3 resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                />
+              </div>
+              <button
+                onClick={handleCount}
+                disabled={counting || !secretKey.trim()}
+                className="px-6 py-3 bg-purple-600 text-white font-semibold rounded-lg hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {counting ? "開票処理中..." : "開票を実行する"}
+              </button>
+            </div>
           ) : (
             <p className="text-sm text-gray-500">
               この選挙は確定済みです。ステータスの変更はできません。
             </p>
           )}
         </div>
+
+        {/* Count Results */}
+        {countResults && totalVotes !== null && (
+          <div className="bg-white rounded-lg shadow p-6 mb-6">
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">
+              開票結果
+            </h2>
+            <div className="space-y-3">
+              {countResults.map((r) => {
+                const pct =
+                  totalVotes > 0
+                    ? ((r.voteCount / totalVotes) * 100).toFixed(1)
+                    : "0";
+                return (
+                  <div
+                    key={r.candidateId}
+                    className="border border-gray-200 rounded-lg p-4"
+                  >
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="font-medium text-gray-900">
+                        {r.candidateName}
+                      </span>
+                      <span className="text-gray-700 font-semibold">
+                        {r.voteCount}票 ({pct}%)
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2.5">
+                      <div
+                        className="bg-purple-600 h-2.5 rounded-full transition-all"
+                        style={{
+                          width: `${totalVotes > 0 ? (r.voteCount / totalVotes) * 100 : 0}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-sm text-gray-500 mt-4">
+              総投票数: {totalVotes}票
+            </p>
+          </div>
+        )}
 
         {/* Links */}
         <div className="flex gap-4 justify-center text-sm">

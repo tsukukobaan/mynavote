@@ -3,7 +3,14 @@ import Redis from "ioredis";
 let redis: Redis | null = null;
 
 // In-memory fallback store for local development without Redis
-const memoryStore = new Map<string, { value: string; expiresAt?: number }>();
+// Use globalThis to ensure singleton across module reloads in dev
+const globalForMemory = globalThis as unknown as {
+  __redisMemoryStore?: Map<string, { value: string; expiresAt?: number }>;
+};
+const memoryStore = globalForMemory.__redisMemoryStore ??= new Map<
+  string,
+  { value: string; expiresAt?: number }
+>();
 
 function isMemoryExpired(key: string): boolean {
   const entry = memoryStore.get(key);

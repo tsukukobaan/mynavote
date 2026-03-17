@@ -28,11 +28,13 @@ export async function POST(
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });
   }
 
-  // Optional CSRF check (if session exists)
-  const session = await getSession();
-  if (session && !verifyCsrfToken(session.csrfToken, parsed.data.csrfToken)) {
-    await writeAuditLog(AuditAction.CSRF_VIOLATION, { ip, electionId: id });
-    return NextResponse.json({ error: "Invalid request" }, { status: 403 });
+  // Optional CSRF check (if session exists and csrfToken is provided)
+  if (parsed.data.csrfToken) {
+    const session = await getSession();
+    if (session && !verifyCsrfToken(session.csrfToken, parsed.data.csrfToken)) {
+      await writeAuditLog(AuditAction.CSRF_VIOLATION, { ip, electionId: id });
+      return NextResponse.json({ error: "Invalid request" }, { status: 403 });
+    }
   }
 
   const election = await prisma.election.findUnique({
