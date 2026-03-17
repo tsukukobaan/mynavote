@@ -6,12 +6,12 @@ export const voteRequestSchema = z.object({
     .string()
     .min(1)
     .max(10000)
-    .regex(/^[A-Za-z0-9+/=]+$/),
+    .regex(/^[A-Za-z0-9+/=_-]+$/),
   ballotTracker: z
     .string()
     .min(1)
     .max(200)
-    .regex(/^[A-Za-z0-9+/=]+$/),
+    .regex(/^[A-Za-z0-9+/=_-]+$/),
   csrfToken: z.string().length(64),
 });
 
