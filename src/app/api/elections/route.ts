@@ -4,9 +4,6 @@ import { prisma } from "@/lib/prisma";
 // GET: Public election list (no admin auth required)
 export async function GET() {
   const elections = await prisma.election.findMany({
-    where: {
-      status: { not: "DRAFT" },
-    },
     include: {
       candidates: { orderBy: { displayOrder: "asc" } },
       _count: { select: { ballots: { where: { isLatest: true } } } },

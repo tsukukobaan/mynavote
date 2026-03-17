@@ -34,5 +34,5 @@ export const createElectionSchema = z.object({
 
 export const countElectionSchema = z.object({
   secretKey: z.string().min(1).max(500),
-  csrfToken: z.string().length(64),
+  csrfToken: z.string().length(64).optional(),
 });
